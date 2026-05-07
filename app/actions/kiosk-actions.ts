@@ -85,8 +85,8 @@ export async function addKioskByStaff(formData: FormData) {
     managerContacts: formData.get("managerContacts") as string,
     kioskMatricule: formData.get("kioskMatricule") as string,
     userId: formData.get("userId") as string,
-    status: formData.get("status") as KioskStatus,
     kioskTown: formData.get("kioskTown") as KioskTown,
+    compartments: formData.get("compartments") as string,
   }
 
   try {
@@ -94,23 +94,65 @@ export async function addKioskByStaff(formData: FormData) {
       return { error: "Veuillez remplir tous les champs obligatoires." }
     }
 
-    // Determine the status based on conditions
-    let kioskStatus: KioskStatus = "AVAILABLE";
-
-    if (!kioskData.userId) {
-      const hasGpsCoordinates = kioskData.gpsLatitude && kioskData.gpsLongitude &&
-        kioskData.gpsLatitude.trim() !== "" && kioskData.gpsLongitude.trim() !== "";
-
-      if (hasGpsCoordinates) {
-        kioskStatus = "UNACTIVE";
-      } else if (kioskData.kioskMatricule && kioskData.kioskMatricule.trim() !== "") {
-        kioskStatus = "IN_STOCK";
-      }
-    } else if (kioskData.status) {
-      kioskStatus = kioskData.status;
+    // STATUT PAR DÉFAUT: IN_STOCK (en stock)
+    let kioskStatus: KioskStatus = "IN_STOCK"
+    
+    // Pour les kiosques MONO: si un client est sélectionné, le kiosque devient ACTIVE (occupé)
+    if (kioskData.kioskType === "MONO" && kioskData.userId) {
+      kioskStatus = "ACTIVE"
     }
 
-    // Create the kiosk with compartments
+    // Préparer les compartiments UNIQUEMENT pour les kiosques GRAND
+    let compartmentsCreate = undefined
+    let hasOccupiedCompartment = false // Flag pour vérifier si un compartiment est occupé
+    
+    if (kioskData.kioskType === "GRAND" && kioskData.compartments) {
+      const compartmentsData = JSON.parse(kioskData.compartments)
+      compartmentsCreate = []
+      
+      // Compartiment Gauche
+      const leftComp = compartmentsData.left || {}
+      const leftStatus = leftComp.status || "AVAILABLE"
+      if (leftStatus === "OCCUPIED") hasOccupiedCompartment = true
+      compartmentsCreate.push({
+        compartmentType: "LEFT",
+        status: leftStatus,
+        clientId: leftComp.clientId || null,
+        customName: leftComp.customName || null,
+        notes: leftComp.notes || null,
+      })
+      
+      // Compartiment Centre
+      const middleComp = compartmentsData.middle || {}
+      const middleStatus = middleComp.status || "AVAILABLE"
+      if (middleStatus === "OCCUPIED") hasOccupiedCompartment = true
+      compartmentsCreate.push({
+        compartmentType: "MIDDLE",
+        status: middleStatus,
+        clientId: middleComp.clientId || null,
+        customName: middleComp.customName || null,
+        notes: middleComp.notes || null,
+      })
+      
+      // Compartiment Droit
+      const rightComp = compartmentsData.right || {}
+      const rightStatus = rightComp.status || "AVAILABLE"
+      if (rightStatus === "OCCUPIED") hasOccupiedCompartment = true
+      compartmentsCreate.push({
+        compartmentType: "RIGHT",
+        status: rightStatus,
+        clientId: rightComp.clientId || null,
+        customName: rightComp.customName || null,
+        notes: rightComp.notes || null,
+      })
+      
+      // Pour les kiosques GRAND: si au moins un compartiment est occupé, le kiosque devient ACTIVE
+      if (hasOccupiedCompartment) {
+        kioskStatus = "ACTIVE"
+      }
+    }
+
+    // Créer le kiosque
     const newKiosk = await prisma.kiosk.create({
       data: {
         kioskName: kioskData.kioskName,
@@ -125,18 +167,15 @@ export async function addKioskByStaff(formData: FormData) {
         status: kioskStatus,
         kioskTown: kioskData.kioskTown,
         monoClientId: kioskData.kioskType === "MONO" && kioskData.userId ? kioskData.userId : null,
-        compartments: {
-          create: generateCompartmentsForKiosk(
-            kioskData.kioskType,
-            0,
-            kioskData.kioskType === "MONO" && kioskData.userId ? kioskData.userId : undefined
-          )
-        }
+        compartments: compartmentsCreate ? { create: compartmentsCreate } : undefined,
+      },
+      include: {
+        compartments: true,
       },
     })
 
-    // Create kiosk assignment if userId is provided
-    if (kioskData.userId) {
+    // Créer l'assignation si client pour MONO
+    if (kioskData.kioskType === "MONO" && kioskData.userId) {
       await prisma.kioskAssignment.create({
         data: {
           kioskId: newKiosk.id,
@@ -147,17 +186,6 @@ export async function addKioskByStaff(formData: FormData) {
         },
       })
 
-      // For MONO kiosks, update the compartment with client
-      if (kioskData.kioskType === "MONO") {
-        await prisma.kioskCompartment.updateMany({
-          where: { kioskId: newKiosk.id, compartmentType: "SINGLE" },
-          data: {
-            clientId: kioskData.userId,
-            status: "OCCUPIED"
-          }
-        });
-      }
-
       const user = await prisma.user.findUnique({
         where: { id: kioskData.userId },
       })
@@ -167,13 +195,29 @@ export async function addKioskByStaff(formData: FormData) {
       }
     }
 
+    // Pour les kiosques GRAND, créer les assignments pour chaque compartiment avec client
+    if (kioskData.kioskType === "GRAND" && newKiosk.compartments && newKiosk.compartments.length > 0) {
+      for (const compartment of newKiosk.compartments) {
+        if (compartment.clientId) {
+          await prisma.kioskCompartmentAssignment.create({
+            data: {
+              compartmentId: compartment.id,
+              userId: compartment.clientId,
+              role: "CLIENT",
+              assignedBy: compartment.clientId,
+              isActive: true,
+            },
+          })
+        }
+      }
+    }
+
     return { message: "Kiosque ajouté avec succès!", kiosk: newKiosk }
   } catch (error) {
     console.error("Error adding kiosk by staff:", error)
     return { error: "Une erreur est survenue lors de l'ajout du kiosque." }
   }
 }
-
 // Get kiosk counts with compartment support
 export async function getKioskCounts() {
   try {
