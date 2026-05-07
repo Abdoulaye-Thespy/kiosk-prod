@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, CheckCircle2, XCircle, UserRound, RefreshCw } from "lucide-react"
+import { Loader2, CheckCircle2, XCircle, UserRound, RefreshCw, MapPin, Navigation, Building2, Phone, Mail } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -17,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Search } from "lucide-react"
 import { fetchClients } from "@/app/actions/fetchUserStats"
 import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
 
 interface Client {
   id: string
@@ -34,7 +35,6 @@ interface CompartmentData {
   clientEmail?: string
   clientPhone?: string
   customName?: string
-  monthlyRevenue?: number
   notes?: string
 }
 
@@ -188,21 +188,28 @@ export function UpdateKioskDialogAdmin({
       const clientName = kiosk.monoClient?.name || kiosk.clientName || ""
       
       // Initialiser les données des compartiments pour les kiosques GRAND
-      let compartmentsData = []
-      if (kiosk.kioskType === "GRAND" && (kiosk as any).compartments) {
+      let compartmentsData: CompartmentData[] = []
+      if (kiosk.kioskType === "GRAND") {
         const comps = (kiosk as any).compartments
-        compartmentsData = comps.map((comp: any) => ({
-          id: comp.id,
-          compartmentType: comp.compartmentType,
-          status: comp.status,
-          clientId: comp.clientId,
-          clientName: comp.client?.name,
-          clientEmail: comp.client?.email,
-          clientPhone: comp.client?.phone,
-          customName: comp.customName,
-          monthlyRevenue: comp.monthlyRevenue,
-          notes: comp.notes,
-        }))
+        if (comps && Array.isArray(comps)) {
+          compartmentsData = comps.map((comp: any) => ({
+            id: comp.id,
+            compartmentType: comp.compartmentType,
+            status: comp.status,
+            clientId: comp.clientId,
+            clientName: comp.client?.name,
+            clientEmail: comp.client?.email,
+            clientPhone: comp.client?.phone,
+            customName: comp.customName,
+            notes: comp.notes,
+          }))
+        } else {
+          compartmentsData = [
+            { compartmentType: "LEFT", status: "AVAILABLE" },
+            { compartmentType: "MIDDLE", status: "AVAILABLE" },
+            { compartmentType: "RIGHT", status: "AVAILABLE" },
+          ]
+        }
       }
       
       setFormData({
@@ -261,7 +268,7 @@ export function UpdateKioskDialogAdmin({
 
   // Calculer le nombre de compartiments occupés
   const getOccupiedCompartmentsCount = () => {
-    if (!formData.compartments) return 0
+    if (!formData.compartments || !Array.isArray(formData.compartments)) return 0
     return formData.compartments.filter(c => c.status === "OCCUPIED").length
   }
 
@@ -279,10 +286,10 @@ export function UpdateKioskDialogAdmin({
     
     if (wasOccupied && willBeFree) {
       needsConfirmation = true
-      message = "⚠️ Attention : Passer ce kiosque de « Occupé » à « Libre » supprimera toutes les informations du client (nom, email, téléphone, produits/services, gestionnaire). Êtes-vous sûr de vouloir continuer ?"
+      message = "⚠️ Attention : Passer ce kiosque de « Occupé » à « Libre » supprimera toutes les informations du client. Êtes-vous sûr de vouloir continuer ?"
     } else if (wasOccupied && willBeStock) {
       needsConfirmation = true
-      message = "⚠️ Attention : Passer ce kiosque de « Occupé » à « En stock » supprimera toutes les informations du client et le retirera du terrain. Êtes-vous sûr de vouloir continuer ?"
+      message = "⚠️ Attention : Passer ce kiosque de « Occupé » à « En stock » supprimera toutes les informations du client. Êtes-vous sûr de vouloir continuer ?"
     } else if (wasOccupied && willBeMaintenance) {
       needsConfirmation = true
       message = "⚠️ Attention : Passer ce kiosque de « Occupé » à « Maintenance » signifie que le kiosque a un problème technique. Le client reste associé mais le kiosque n'est plus actif. Confirmez-vous ?"
@@ -331,11 +338,13 @@ export function UpdateKioskDialogAdmin({
   const updateCompartmentStatus = (compartmentType: string, status: string) => {
     setFormData(prev => ({
       ...prev,
-      compartments: (prev.compartments || []).map(comp =>
-        comp.compartmentType === compartmentType
-          ? { ...comp, status, clientId: null, clientName: undefined, clientEmail: undefined, clientPhone: undefined }
-          : comp
-      ),
+      compartments: prev.compartments && Array.isArray(prev.compartments)
+        ? prev.compartments.map(comp =>
+            comp.compartmentType === compartmentType
+              ? { ...comp, status, clientId: null, clientName: undefined, clientEmail: undefined, clientPhone: undefined }
+              : comp
+          )
+        : prev.compartments
     }))
   }
 
@@ -343,36 +352,43 @@ export function UpdateKioskDialogAdmin({
   const updateCompartmentClient = (compartmentType: string, client: Client) => {
     setFormData(prev => ({
       ...prev,
-      compartments: (prev.compartments || []).map(comp =>
-        comp.compartmentType === compartmentType
-          ? { 
-              ...comp, 
-              clientId: client.id, 
-              clientName: client.name,
-              clientEmail: client.email,
-              clientPhone: client.phone,
-              status: "OCCUPIED" 
-            }
-          : comp
-      ),
+      compartments: prev.compartments && Array.isArray(prev.compartments)
+        ? prev.compartments.map(comp =>
+            comp.compartmentType === compartmentType
+              ? { 
+                  ...comp, 
+                  clientId: client.id, 
+                  clientName: client.name,
+                  clientEmail: client.email,
+                  clientPhone: client.phone,
+                  status: "OCCUPIED" 
+                }
+              : comp
+          )
+        : prev.compartments
     }))
-  }
-
-  // Obtenir les données d'un compartiment par son type
-  const getCompartmentData = (compartmentType: string) => {
-    return (formData.compartments || []).find(comp => comp.compartmentType === compartmentType)
   }
 
   // Mettre à jour les informations additionnelles d'un compartiment
   const updateCompartmentInfo = (compartmentType: string, field: string, value: any) => {
     setFormData(prev => ({
       ...prev,
-      compartments: (prev.compartments || []).map(comp =>
-        comp.compartmentType === compartmentType
-          ? { ...comp, [field]: value }
-          : comp
-      ),
+      compartments: prev.compartments && Array.isArray(prev.compartments)
+        ? prev.compartments.map(comp =>
+            comp.compartmentType === compartmentType
+              ? { ...comp, [field]: value }
+              : comp
+          )
+        : prev.compartments
     }))
+  }
+
+  // Obtenir les données d'un compartiment par son type
+  const getCompartmentData = (compartmentType: string): CompartmentData | undefined => {
+    if (formData.compartments && Array.isArray(formData.compartments)) {
+      return formData.compartments.find(comp => comp.compartmentType === compartmentType)
+    }
+    return undefined
   }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -383,7 +399,6 @@ export function UpdateKioskDialogAdmin({
 
     let prismaStatus = formData.status
 
-    // Pour les kiosques MONO, on garde la logique existante
     if (formData.kioskType === "MONO") {
       if (selectedCategory) {
         const statuses = categoryStatusMap[selectedCategory]
@@ -403,7 +418,6 @@ export function UpdateKioskDialogAdmin({
         prismaStatus = hasGpsCoordinates ? "UNACTIVE" : "AVAILABLE"
       }
     } else {
-      // Pour les kiosques GRAND, le statut dépend des compartiments
       const occupiedCount = getOccupiedCompartmentsCount()
       if (occupiedCount === 0) {
         prismaStatus = "AVAILABLE"
@@ -412,12 +426,11 @@ export function UpdateKioskDialogAdmin({
       }
     }
 
-    // Préparer les données des compartiments pour l'envoi
-    const compartmentsData = formData.kioskType === "GRAND" && formData.compartments
+    const compartmentsData = formData.kioskType === "GRAND" && formData.compartments && Array.isArray(formData.compartments)
       ? {
-          left: (formData.compartments.find(c => c.compartmentType === "LEFT")),
-          middle: (formData.compartments.find(c => c.compartmentType === "MIDDLE")),
-          right: (formData.compartments.find(c => c.compartmentType === "RIGHT")),
+          left: formData.compartments.find(c => c.compartmentType === "LEFT"),
+          middle: formData.compartments.find(c => c.compartmentType === "MIDDLE"),
+          right: formData.compartments.find(c => c.compartmentType === "RIGHT"),
         }
       : null
 
@@ -467,7 +480,6 @@ export function UpdateKioskDialogAdmin({
     }))
   }
 
-  // Composant pour la sélection de client par compartiment
   const ClientSelector = ({ 
     compartmentType, 
     open, 
@@ -512,59 +524,50 @@ export function UpdateKioskDialogAdmin({
     </Popover>
   )
 
-  // Composant pour les informations d'un compartiment occupé
   const OccupantInfoForm = ({ compartment, onUpdate }: { compartment: CompartmentData; onUpdate: (field: string, value: any) => void }) => (
     <div className="mt-3 space-y-2 pt-2 border-t border-gray-100">
-      <p className="text-xs font-medium text-gray-500">Informations de l'occupant</p>
-      <div>
-        <Label className="text-xs">Nom du client</Label>
-        <Input
-          type="text"
-          value={compartment.clientName || ""}
-          onChange={(e) => onUpdate("clientName", e.target.value)}
-          className="text-sm mt-1"
-          placeholder="Nom du client"
-        />
-      </div>
-      <div>
-        <Label className="text-xs">Email</Label>
-        <Input
-          type="email"
-          value={compartment.clientEmail || ""}
-          onChange={(e) => onUpdate("clientEmail", e.target.value)}
-          className="text-sm mt-1"
-          placeholder="Email du client"
-        />
-      </div>
-      <div>
-        <Label className="text-xs">Téléphone</Label>
-        <Input
-          type="tel"
-          value={compartment.clientPhone || ""}
-          onChange={(e) => onUpdate("clientPhone", e.target.value)}
-          className="text-sm mt-1"
-          placeholder="Téléphone du client"
-        />
-      </div>
-      <div>
-        <Label className="text-xs">Revenu mensuel (CFA)</Label>
-        <Input
-          type="number"
-          value={compartment.monthlyRevenue || ""}
-          onChange={(e) => onUpdate("monthlyRevenue", e.target.value ? Number(e.target.value) : undefined)}
-          className="text-sm mt-1"
-          placeholder="Revenu mensuel"
-        />
-      </div>
-      <div>
-        <Label className="text-xs">Notes</Label>
-        <Input
-          type="text"
-          value={compartment.notes || ""}
-          onChange={(e) => onUpdate("notes", e.target.value)}
-          className="text-sm mt-1"
-          placeholder="Notes supplémentaires"
-        />
+      <p className="text-xs font-medium text-gray-500 mb-2">Informations de l'occupant</p>
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <UserRound className="h-3 w-3 text-gray-400" />
+          <Input
+            type="text"
+            value={compartment.clientName || ""}
+            onChange={(e) => onUpdate("clientName", e.target.value)}
+            className="text-sm flex-1"
+            placeholder="Nom du client"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Mail className="h-3 w-3 text-gray-400" />
+          <Input
+            type="email"
+            value={compartment.clientEmail || ""}
+            onChange={(e) => onUpdate("clientEmail", e.target.value)}
+            className="text-sm flex-1"
+            placeholder="Email du client"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Phone className="h-3 w-3 text-gray-400" />
+          <Input
+            type="tel"
+            value={compartment.clientPhone || ""}
+            onChange={(e) => onUpdate("clientPhone", e.target.value)}
+            className="text-sm flex-1"
+            placeholder="Téléphone du client"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Building2 className="h-3 w-3 text-gray-400" />
+          <Input
+            type="text"
+            value={compartment.notes || ""}
+            onChange={(e) => onUpdate("notes", e.target.value)}
+            className="text-sm flex-1"
+            placeholder="Notes supplémentaires"
+          />
+        </div>
       </div>
     </div>
   )
@@ -572,7 +575,7 @@ export function UpdateKioskDialogAdmin({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[550px] max-h-[85vh] flex flex-col">
+        <DialogContent className="sm:max-w-[600px] max-h-[85vh] flex flex-col">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="text-xl font-semibold">
               {isGrandKiosk ? "Gérer les compartiments" : "Modifier le kiosque"}
@@ -594,28 +597,120 @@ export function UpdateKioskDialogAdmin({
               </Alert>
             )}
             <form id="kiosk-form" onSubmit={handleSubmit} className="space-y-3 pr-4">
-              {/* Pour les kiosques MONO, afficher les champs normaux */}
-              {!isGrandKiosk && (
-                <>
-                  <div>
-                    <Label htmlFor="kiosk-name">Nom de l'Entreprise</Label>
-                    <Input
-                      id="kiosk-name"
-                      type="text"
-                      placeholder="Nom du kiosque"
-                      value={formData.kioskName || ""}
-                      onChange={(e) => setFormData({ ...formData, kioskName: e.target.value })}
-                    />
-                  </div>
-
+              {/* Pour les kiosques GRAND, afficher d'abord les infos générales MODIFIABLES */}
+              {isGrandKiosk && (
+                <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-3">
+                  <p className="text-sm font-semibold text-gray-700 mb-2">Informations du kiosque</p>
+                  
                   <div>
                     <Label htmlFor="kiosk-matricule">Matricule</Label>
                     <Input
                       id="kiosk-matricule"
                       type="text"
                       value={formData.kioskMatricule || ""}
-                      disabled
-                      className="bg-gray-50"
+                      onChange={(e) => setFormData({ ...formData, kioskMatricule: e.target.value })}
+                      placeholder="Matricule du kiosque"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="kiosk-name-grand">Nom de l'Entreprise</Label>
+                    <Input
+                      id="kiosk-name-grand"
+                      type="text"
+                      value={formData.kioskName || ""}
+                      onChange={(e) => setFormData({ ...formData, kioskName: e.target.value })}
+                      placeholder="Nom du kiosque"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="kiosk-address-grand">Adresse</Label>
+                    <Input
+                      id="kiosk-address-grand"
+                      type="text"
+                      value={formData.kioskAddress || ""}
+                      onChange={(e) => setFormData({ ...formData, kioskAddress: e.target.value })}
+                      placeholder="Adresse du kiosque"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="kiosk-town-grand">Ville</Label>
+                    <Select
+                      value={formData.kioskTown || "DOUALA"}
+                      onValueChange={(value) => setFormData({ ...formData, kioskTown: value })}
+                    >
+                      <SelectTrigger className="w-full mt-1">
+                        <SelectValue placeholder="Sélectionnez la ville" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {towns.map((town) => (
+                          <SelectItem key={town.value} value={town.value}>
+                            {town.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label htmlFor="latitude-grand">Latitude</Label>
+                      <Input
+                        id="latitude-grand"
+                        type="text"
+                        value={formData.gpsLatitude || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            gpsLatitude: e.target.value !== "" ? Number.parseFloat(e.target.value) : null,
+                          })
+                        }
+                        placeholder="Latitude"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="longitude-grand">Longitude</Label>
+                      <Input
+                        id="longitude-grand"
+                        type="text"
+                        value={formData.gpsLongitude || ""}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            gpsLongitude: e.target.value !== "" ? Number.parseFloat(e.target.value) : null,
+                          })
+                        }
+                        placeholder="Longitude"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Pour les kiosques MONO, afficher les champs normaux */}
+              {!isGrandKiosk && (
+                <>
+                  <div>
+                    <Label htmlFor="kiosk-name">Matricule</Label>
+                    <Input
+                      id="kiosk-name"
+                      type="text"
+                      placeholder="Matricule du kiosque"
+                      value={formData.kioskMatricule || ""}
+                      onChange={(e) => setFormData({ ...formData, kioskMatricule: e.target.value })}
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="kiosk-company">Nom de l'Entreprise</Label>
+                    <Input
+                      id="kiosk-company"
+                      type="text"
+                      placeholder="Nom du kiosque"
+                      value={formData.kioskName || ""}
+                      onChange={(e) => setFormData({ ...formData, kioskName: e.target.value })}
                     />
                   </div>
 
@@ -677,13 +772,7 @@ export function UpdateKioskDialogAdmin({
                     </div>
                   ) : (
                     <div>
-                      <Label htmlFor="client-select">
-                        Client du kiosque
-                        {!selectedClientId && (
-                          <span className="ml-2 text-xs text-blue-500 font-normal">(Aucun client - Kiosque libre)</span>
-                        )}
-                      </Label>
-
+                      <Label htmlFor="client-select">Client du kiosque</Label>
                       <Popover open={openClientSelect} onOpenChange={setOpenClientSelect}>
                         <PopoverTrigger asChild>
                           <Button variant="outline" className="w-full justify-between mt-1">
@@ -785,13 +874,9 @@ export function UpdateKioskDialogAdmin({
                     </div>
                   </div>
 
-                  {/* Informations client pour MONO */}
                   {(hasClient || selectedClientId) && (
                     <>
-                      <div className="border-t pt-2 mt-2">
-                        <p className="text-sm font-medium text-gray-500 mb-2">Informations du client</p>
-                      </div>
-
+                      <Separator />
                       <div>
                         <Label htmlFor="products-services">Produits/Services</Label>
                         <Input
@@ -829,7 +914,7 @@ export function UpdateKioskDialogAdmin({
                 </>
               )}
 
-              {/* Pour les kiosques GRAND, afficher uniquement les compartiments */}
+              {/* Pour les kiosques GRAND - Compartiments */}
               {isGrandKiosk && (
                 <>
                   <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
@@ -845,9 +930,9 @@ export function UpdateKioskDialogAdmin({
                     const isMaintenance = leftComp?.status === "UNDER_MAINTENANCE"
                     
                     return (
-                      <div className="p-3 rounded-lg bg-white border">
+                      <div className="p-4 rounded-lg bg-orange-50 border border-orange-200">
                         <div className="flex items-center justify-between mb-3">
-                          <Label className="font-semibold text-base">Compartiment Gauche</Label>
+                          <Label className="font-semibold text-base text-orange-800">📦 Compartiment Gauche</Label>
                           <Badge className={
                             isOccupied ? "bg-green-100 text-green-700" :
                             isMaintenance ? "bg-yellow-100 text-yellow-700" :
@@ -861,7 +946,7 @@ export function UpdateKioskDialogAdmin({
                         
                         {isOccupied ? (
                           <div>
-                            <div className="flex items-center gap-2 mt-1 p-2 bg-gray-50 rounded">
+                            <div className="flex items-center gap-2 mt-1 p-2 bg-white rounded">
                               <UserRound className="h-4 w-4 text-green-600" />
                               <div className="flex-1">
                                 <p className="text-sm font-semibold text-gray-800">{leftComp?.clientName || "Client non renseigné"}</p>
@@ -883,7 +968,6 @@ export function UpdateKioskDialogAdmin({
                               </Button>
                             </div>
                             <div className="mt-2">
-                              <Label>Changer de client</Label>
                               <ClientSelector
                                 compartmentType="LEFT"
                                 open={openLeftClientSelect}
@@ -899,27 +983,28 @@ export function UpdateKioskDialogAdmin({
                           </div>
                         ) : (
                           <div>
-                            <Label>Statut</Label>
-                            <Select
-                              value={leftComp?.status || "AVAILABLE"}
-                              onValueChange={(value) => updateCompartmentStatus("LEFT", value)}
-                            >
-                              <SelectTrigger className="w-full mt-1">
-                                <SelectValue placeholder="Statut" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {compartmentStatuses.map((status) => (
-                                  <SelectItem key={status.value} value={status.value}>
-                                    {status.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <div>
+                              <Label>Statut</Label>
+                              <Select
+                                value={leftComp?.status || "AVAILABLE"}
+                                onValueChange={(value) => updateCompartmentStatus("LEFT", value)}
+                              >
+                                <SelectTrigger className="w-full mt-1">
+                                  <SelectValue placeholder="Statut" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {compartmentStatuses.map((status) => (
+                                    <SelectItem key={status.value} value={status.value}>
+                                      {status.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
 
                             {leftComp?.status === "OCCUPIED" && (
                               <>
                                 <div className="mt-2">
-                                  <Label>Sélectionner un client</Label>
                                   <ClientSelector
                                     compartmentType="LEFT"
                                     open={openLeftClientSelect}
@@ -947,9 +1032,9 @@ export function UpdateKioskDialogAdmin({
                     const isMaintenance = middleComp?.status === "UNDER_MAINTENANCE"
                     
                     return (
-                      <div className="p-3 rounded-lg bg-white border">
+                      <div className="p-4 rounded-lg bg-orange-50 border border-orange-200">
                         <div className="flex items-center justify-between mb-3">
-                          <Label className="font-semibold text-base">Compartiment Centre</Label>
+                          <Label className="font-semibold text-base text-orange-800">📦 Compartiment Centre</Label>
                           <Badge className={
                             isOccupied ? "bg-green-100 text-green-700" :
                             isMaintenance ? "bg-yellow-100 text-yellow-700" :
@@ -963,7 +1048,7 @@ export function UpdateKioskDialogAdmin({
                         
                         {isOccupied ? (
                           <div>
-                            <div className="flex items-center gap-2 mt-1 p-2 bg-gray-50 rounded">
+                            <div className="flex items-center gap-2 mt-1 p-2 bg-white rounded">
                               <UserRound className="h-4 w-4 text-green-600" />
                               <div className="flex-1">
                                 <p className="text-sm font-semibold text-gray-800">{middleComp?.clientName || "Client non renseigné"}</p>
@@ -985,7 +1070,6 @@ export function UpdateKioskDialogAdmin({
                               </Button>
                             </div>
                             <div className="mt-2">
-                              <Label>Changer de client</Label>
                               <ClientSelector
                                 compartmentType="MIDDLE"
                                 open={openMiddleClientSelect}
@@ -1001,27 +1085,28 @@ export function UpdateKioskDialogAdmin({
                           </div>
                         ) : (
                           <div>
-                            <Label>Statut</Label>
-                            <Select
-                              value={middleComp?.status || "AVAILABLE"}
-                              onValueChange={(value) => updateCompartmentStatus("MIDDLE", value)}
-                            >
-                              <SelectTrigger className="w-full mt-1">
-                                <SelectValue placeholder="Statut" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {compartmentStatuses.map((status) => (
-                                  <SelectItem key={status.value} value={status.value}>
-                                    {status.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <div>
+                              <Label>Statut</Label>
+                              <Select
+                                value={middleComp?.status || "AVAILABLE"}
+                                onValueChange={(value) => updateCompartmentStatus("MIDDLE", value)}
+                              >
+                                <SelectTrigger className="w-full mt-1">
+                                  <SelectValue placeholder="Statut" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {compartmentStatuses.map((status) => (
+                                    <SelectItem key={status.value} value={status.value}>
+                                      {status.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
 
                             {middleComp?.status === "OCCUPIED" && (
                               <>
                                 <div className="mt-2">
-                                  <Label>Sélectionner un client</Label>
                                   <ClientSelector
                                     compartmentType="MIDDLE"
                                     open={openMiddleClientSelect}
@@ -1049,9 +1134,9 @@ export function UpdateKioskDialogAdmin({
                     const isMaintenance = rightComp?.status === "UNDER_MAINTENANCE"
                     
                     return (
-                      <div className="p-3 rounded-lg bg-white border">
+                      <div className="p-4 rounded-lg bg-orange-50 border border-orange-200">
                         <div className="flex items-center justify-between mb-3">
-                          <Label className="font-semibold text-base">Compartiment Droit</Label>
+                          <Label className="font-semibold text-base text-orange-800">📦 Compartiment Droit</Label>
                           <Badge className={
                             isOccupied ? "bg-green-100 text-green-700" :
                             isMaintenance ? "bg-yellow-100 text-yellow-700" :
@@ -1065,7 +1150,7 @@ export function UpdateKioskDialogAdmin({
                         
                         {isOccupied ? (
                           <div>
-                            <div className="flex items-center gap-2 mt-1 p-2 bg-gray-50 rounded">
+                            <div className="flex items-center gap-2 mt-1 p-2 bg-white rounded">
                               <UserRound className="h-4 w-4 text-green-600" />
                               <div className="flex-1">
                                 <p className="text-sm font-semibold text-gray-800">{rightComp?.clientName || "Client non renseigné"}</p>
@@ -1087,7 +1172,6 @@ export function UpdateKioskDialogAdmin({
                               </Button>
                             </div>
                             <div className="mt-2">
-                              <Label>Changer de client</Label>
                               <ClientSelector
                                 compartmentType="RIGHT"
                                 open={openRightClientSelect}
@@ -1103,27 +1187,28 @@ export function UpdateKioskDialogAdmin({
                           </div>
                         ) : (
                           <div>
-                            <Label>Statut</Label>
-                            <Select
-                              value={rightComp?.status || "AVAILABLE"}
-                              onValueChange={(value) => updateCompartmentStatus("RIGHT", value)}
-                            >
-                              <SelectTrigger className="w-full mt-1">
-                                <SelectValue placeholder="Statut" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {compartmentStatuses.map((status) => (
-                                  <SelectItem key={status.value} value={status.value}>
-                                    {status.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <div>
+                              <Label>Statut</Label>
+                              <Select
+                                value={rightComp?.status || "AVAILABLE"}
+                                onValueChange={(value) => updateCompartmentStatus("RIGHT", value)}
+                              >
+                                <SelectTrigger className="w-full mt-1">
+                                  <SelectValue placeholder="Statut" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {compartmentStatuses.map((status) => (
+                                    <SelectItem key={status.value} value={status.value}>
+                                      {status.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
 
                             {rightComp?.status === "OCCUPIED" && (
                               <>
                                 <div className="mt-2">
-                                  <Label>Sélectionner un client</Label>
                                   <ClientSelector
                                     compartmentType="RIGHT"
                                     open={openRightClientSelect}
