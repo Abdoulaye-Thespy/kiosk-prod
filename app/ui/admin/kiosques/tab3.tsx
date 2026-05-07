@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
 import { fr } from "date-fns/locale"
-import { MoreHorizontal, RotateCcw, Filter, Eye, X, MapPin, Store, User, Phone, Tag, Package, Wrench, CheckCircle, Warehouse, LayoutGrid, Mail, Building2 } from "lucide-react"
+import { MoreHorizontal, RotateCcw, Filter, Eye, MapPin, Store, User, Phone, Tag, Package, Wrench, CheckCircle, LayoutGrid, Mail, Building2 } from "lucide-react"
 import { UpdateKioskDialogAdmin } from "./modifykiok"
 import { useState, useEffect } from "react"
 import {
@@ -24,8 +24,18 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { type Kiosk } from "@prisma/client"
 
+interface KioskWithClient extends Kiosk {
+  monoClient?: {
+    id: string
+    name: string
+    email: string
+    phone?: string
+  } | null
+  compartments?: any[]
+}
+
 interface KioskTab3Props {
-  kiosks: Kiosk[]
+  kiosks: KioskWithClient[]
   totalPages: number
   currentPage: number
   searchTerm: string
@@ -52,7 +62,7 @@ const categoryToStatusMap: Record<string, string[]> = {
 const getStatusColor = (status: string) => {
   if (status === "ACTIVE") return "text-green-600 bg-green-50"
   if (status === "IN_STOCK") return "text-blue-600 bg-blue-50"
-  if (["AVAILABLE", "REQUEST", "LOCALIZING", "UNACTIVE"].includes(status)) return "text-emerald-600 bg-emerald-50"
+  if (["AVAILABLE", "REQUEST", "LOCALIZING", "UNACTIVE"].includes(status)) return "text-blue-600 bg-blue-50"
   if (["ACTIVE_UNDER_MAINTENANCE", "UNACTIVE_UNDER_MAINTENANCE"].includes(status)) return "text-yellow-600 bg-yellow-50"
   return "text-gray-600 bg-gray-50"
 }
@@ -79,11 +89,16 @@ const townTranslations: Record<string, string> = {
 }
 
 // Composant pour le dialogue de détails du kiosque
-function KioskDetailsDialog({ kiosk, isOpen, onClose }: { kiosk: Kiosk | null; isOpen: boolean; onClose: () => void }) {
+function KioskDetailsDialog({ kiosk, isOpen, onClose }: { kiosk: KioskWithClient | null; isOpen: boolean; onClose: () => void }) {
   if (!kiosk) return null
 
-  // Récupérer les informations du client depuis monoClient
-  const clientInfo = (kiosk as any).monoClient
+  const clientInfo = kiosk.monoClient
+  // Sécuriser l'accès aux compartiments
+  const compartments = Array.isArray(kiosk.compartments) ? kiosk.compartments : []
+  
+  // Calculer le nombre de compartiments occupés
+  const occupiedCount = compartments.filter((c: any) => c?.status === "OCCUPIED").length
+  const totalCompartments = compartments.length
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -176,7 +191,7 @@ function KioskDetailsDialog({ kiosk, isOpen, onClose }: { kiosk: Kiosk | null; i
               </div>
             )}
 
-            {/* Informations sur le client (pour MONO) - Avec nom, email et téléphone */}
+            {/* Informations sur le client (pour MONO) */}
             {kiosk.kioskType === "MONO" && (
               <div className="flex items-start gap-3 p-2 rounded-lg bg-white border">
                 {clientInfo ? (
@@ -219,39 +234,48 @@ function KioskDetailsDialog({ kiosk, isOpen, onClose }: { kiosk: Kiosk | null; i
               </div>
             )}
 
-            {/* Compartiments (pour GRAND) */}
-            {kiosk.kioskType === "GRAND" && (
+            {/* Compartiments (pour GRAND) - avec fraction */}
+            {kiosk.kioskType === "GRAND" && compartments.length > 0 && (
               <div className="p-3 rounded-lg bg-white border">
-                <p className="text-sm font-medium text-gray-500 mb-2 flex items-center gap-2">
-                  <LayoutGrid className="h-4 w-4" />
-                  Compartiments
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-medium text-gray-500 flex items-center gap-2">
+                    <LayoutGrid className="h-4 w-4" />
+                    Compartiments
+                  </p>
+                  <Badge className="bg-blue-100 text-blue-700">
+                    {occupiedCount}/{totalCompartments} occupés
+                  </Badge>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {(kiosk as any).compartments && (kiosk as any).compartments.map((comp: any) => {
+                  {compartments.map((comp: any) => {
                     let statusIcon = null
                     let statusText = ""
-                    if (comp.status === "OCCUPIED") {
+                    let statusColor = ""
+                    if (comp?.status === "OCCUPIED") {
                       statusIcon = <CheckCircle className="h-3 w-3 text-green-500" />
                       statusText = "Occupé"
-                    } else if (comp.status === "AVAILABLE") {
+                      statusColor = "bg-green-50"
+                    } else if (comp?.status === "AVAILABLE") {
                       statusIcon = <Package className="h-3 w-3 text-blue-500" />
                       statusText = "Libre"
-                    } else if (comp.status === "UNDER_MAINTENANCE") {
+                      statusColor = "bg-blue-50"
+                    } else if (comp?.status === "UNDER_MAINTENANCE") {
                       statusIcon = <Wrench className="h-3 w-3 text-yellow-500" />
                       statusText = "Maintenance"
+                      statusColor = "bg-yellow-50"
                     }
                     return (
-                      <div key={comp.id} className="text-center p-2 rounded-lg bg-gray-50">
+                      <div key={comp?.id || Math.random()} className={`text-center p-2 rounded-lg ${statusColor}`}>
                         <p className="text-xs font-medium text-gray-700">
-                          {comp.compartmentType === "LEFT" ? "Gauche" :
-                           comp.compartmentType === "MIDDLE" ? "Centre" :
-                           comp.compartmentType === "RIGHT" ? "Droit" : "Unique"}
+                          {comp?.compartmentType === "LEFT" ? "Gauche" :
+                           comp?.compartmentType === "MIDDLE" ? "Centre" :
+                           comp?.compartmentType === "RIGHT" ? "Droit" : "Unique"}
                         </p>
                         <div className="flex items-center justify-center gap-1 mt-1">
                           {statusIcon}
                           <p className="text-xs text-gray-600">{statusText}</p>
                         </div>
-                        {comp.client && (
+                        {comp?.client && (
                           <div className="mt-1 text-xs text-gray-500 truncate" title={comp.client.name}>
                             {comp.client.name}
                           </div>
@@ -302,13 +326,13 @@ export default function KioskTab3({
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [isModifyDialogOpen, setIsModifyDialogOpen] = useState(false)
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false)
-  const [selectedKiosk, setSelectedKiosk] = useState<Kiosk | null>(null)
+  const [selectedKiosk, setSelectedKiosk] = useState<KioskWithClient | null>(null)
   
   // Filtres locaux
   const [localFilterType, setLocalFilterType] = useState<string>("all")
   const [localFilterCategory, setLocalFilterCategory] = useState<string>(filterStatus || "all")
   const [localSearchTerm, setLocalSearchTerm] = useState<string>(searchTerm || "")
-  const [filteredKiosks, setFilteredKiosks] = useState<Kiosk[]>(kiosks)
+  const [filteredKiosks, setFilteredKiosks] = useState<KioskWithClient[]>(kiosks)
 
   // Appliquer les filtres
   useEffect(() => {
@@ -359,12 +383,12 @@ export default function KioskTab3({
     setIsFilterOpen(false)
   }
 
-  const handleModify = (kiosk: Kiosk) => {
+  const handleModify = (kiosk: KioskWithClient) => {
     setSelectedKiosk(kiosk)
     setIsModifyDialogOpen(true)
   }
 
-  const handleViewDetails = (kiosk: Kiosk) => {
+  const handleViewDetails = (kiosk: KioskWithClient) => {
     setSelectedKiosk(kiosk)
     setIsDetailsDialogOpen(true)
   }
@@ -373,6 +397,12 @@ export default function KioskTab3({
     if (window.confirm("Êtes-vous sûr de vouloir supprimer ce kiosque ?")) {
       onKioskDelete(kioskId)
     }
+  }
+
+  // Forcer le rafraîchissement après modification pour que les compartiments soient à jour
+  const handleKioskUpdate = (updatedKiosk: Kiosk) => {
+    onKioskUpdate(updatedKiosk)
+    onRefresh()
   }
 
   return (
@@ -637,8 +667,8 @@ export default function KioskTab3({
         kiosk={selectedKiosk}
         onSuccess={(updatedKiosk) => {
           setIsModifyDialogOpen(false)
-          onKioskUpdate(updatedKiosk)
-          onRefresh()
+          // Mettre à jour le kiosque dans la liste
+          handleKioskUpdate(updatedKiosk)
         }}
       />
     </div>

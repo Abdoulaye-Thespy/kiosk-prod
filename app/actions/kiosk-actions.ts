@@ -517,7 +517,7 @@ export async function getKiosks({
           compartments: {
             include: {
               client: {
-                select: { name: true, email: true, phone: true }
+                select: { id: true, name: true, email: true, phone: true}
               }
             }
           },
@@ -619,9 +619,9 @@ export async function getUserKiosks({
   }
 }
 
-// Update kiosk with compartment support
-// Update kiosk with compartment support
-export async function updateKiosk(kioskId: number, formData: KioskFormData) {
+
+// Update kiosk with compartment support (pour MONO et GRAND)
+export async function updateKiosk(kioskId: number, formData: any) {
   try {
     // Récupérer le kiosque existant avec ses informations
     const existingKiosk = await prisma.kiosk.findUnique({
@@ -640,27 +640,18 @@ export async function updateKiosk(kioskId: number, formData: KioskFormData) {
     const oldUserId = existingKiosk.monoClientId
     const newUserId = formData.userId
 
-    // Déterminer le nouveau statut en fonction des changements
+    // Déterminer le nouveau statut pour MONO
     let newStatus = formData.status
 
     if (isMonoKiosk) {
-      // Cas 1: Ajout d'un client (pas de client -> nouveau client)
       if (!oldUserId && newUserId) {
-        newStatus = "ACTIVE"  // 🟢 OCCUPÉ
-      }
-      // Cas 2: Retrait d'un client (client existant -> plus de client)
-      else if (oldUserId && !newUserId) {
-        // Vérifier si le kiosque a des coordonnées GPS
+        newStatus = "ACTIVE"
+      } else if (oldUserId && !newUserId) {
         const hasGpsCoordinates = existingKiosk.gpsLatitude && existingKiosk.gpsLongitude
         newStatus = hasGpsCoordinates ? "UNACTIVE" : "AVAILABLE"
-      }
-      // Cas 3: Changement de client (client A -> client B)
-      else if (oldUserId && newUserId && oldUserId !== newUserId) {
-        newStatus = "ACTIVE"  // Reste OCCUPÉ
-      }
-      // Cas 4: Aucun changement de client
-      else {
-        // Garder le statut fourni ou l'ancien
+      } else if (oldUserId && newUserId && oldUserId !== newUserId) {
+        newStatus = "ACTIVE"
+      } else {
         newStatus = formData.status || existingKiosk.status
       }
     }
@@ -676,13 +667,13 @@ export async function updateKiosk(kioskId: number, formData: KioskFormData) {
         productTypes: formData.productTypes,
         managerName: formData.managerName,
         managerContacts: formData.managerContacts,
-        status: newStatus,
+        status: isMonoKiosk ? newStatus : formData.status,
         kioskTown: formData.kioskTown,
-        monoClientId: newUserId || null,
+        monoClientId: isMonoKiosk ? (newUserId || null) : existingKiosk.monoClientId,
       },
     })
 
-    // Gérer les assignments et compartiments pour les kiosques MONO
+    // Gestion pour les kiosques MONO
     if (isMonoKiosk) {
       // Supprimer l'ancien assignment si existant
       if (oldUserId) {
@@ -722,7 +713,36 @@ export async function updateKiosk(kioskId: number, formData: KioskFormData) {
       }
     }
 
-    // Pour les kiosques GRAND, on ne gère pas ici (à faire séparément si besoin)
+    // Gestion pour les kiosques GRAND - Mise à jour des compartiments
+    if (!isMonoKiosk && formData.compartments) {
+      const compartmentsData = formData.compartments
+      
+      for (const compartment of existingKiosk.compartments) {
+        let newCompartmentStatus = compartment.status
+        let newClientId = compartment.clientId
+        
+        if (compartment.compartmentType === "LEFT" && compartmentsData.left) {
+          newCompartmentStatus = compartmentsData.left.status || "AVAILABLE"
+          newClientId = compartmentsData.left.clientId || null
+        } else if (compartment.compartmentType === "MIDDLE" && compartmentsData.middle) {
+          newCompartmentStatus = compartmentsData.middle.status || "AVAILABLE"
+          newClientId = compartmentsData.middle.clientId || null
+        } else if (compartment.compartmentType === "RIGHT" && compartmentsData.right) {
+          newCompartmentStatus = compartmentsData.right.status || "AVAILABLE"
+          newClientId = compartmentsData.right.clientId || null
+        }
+        
+        await prisma.kioskCompartment.update({
+          where: { id: compartment.id },
+          data: {
+            status: newCompartmentStatus,
+            clientId: newClientId,
+            assignedAt: newClientId ? new Date() : null,
+            assignedBy: newClientId ? formData.userId || "admin" : null,
+          },
+        })
+      }
+    }
 
     return { message: "Kiosque modifié avec succès!", kiosk: updatedKiosk }
   } catch (error) {
