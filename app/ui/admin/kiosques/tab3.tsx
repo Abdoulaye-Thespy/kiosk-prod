@@ -68,8 +68,13 @@ const getStatusColor = (status: string) => {
 }
 
 // Traduction des statuts Prisma pour l'affichage
-const getStatusTranslation = (status: string) => {
-  if (status === "ACTIVE") return "🟢 Occupé"
+const getStatusTranslation = (status: string, isGrand?: boolean, occupiedCount?: number, totalCompartments?: number) => {
+  if (status === "ACTIVE") {
+    if (isGrand && occupiedCount !== undefined && totalCompartments !== undefined) {
+      return `🟢 Occupé (${occupiedCount}/${totalCompartments})`
+    }
+    return "🟢 Occupé"
+  }
   if (status === "IN_STOCK") return "🏚️ En stock"
   if (["AVAILABLE", "REQUEST", "LOCALIZING", "UNACTIVE"].includes(status)) return "🔵 Libre"
   if (["ACTIVE_UNDER_MAINTENANCE", "UNACTIVE_UNDER_MAINTENANCE"].includes(status)) return "🟡 Maintenance"
@@ -99,6 +104,13 @@ function KioskDetailsDialog({ kiosk, isOpen, onClose }: { kiosk: KioskWithClient
   // Calculer le nombre de compartiments occupés
   const occupiedCount = compartments.filter((c: any) => c?.status === "OCCUPIED").length
   const totalCompartments = compartments.length
+
+  // Organiser les compartiments dans l'ordre LEFT, MIDDLE, RIGHT
+  const orderedCompartments = [
+    compartments.find((c: any) => c?.compartmentType === "LEFT"),
+    compartments.find((c: any) => c?.compartmentType === "MIDDLE"),
+    compartments.find((c: any) => c?.compartmentType === "RIGHT"),
+  ].filter(Boolean)
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -234,7 +246,7 @@ function KioskDetailsDialog({ kiosk, isOpen, onClose }: { kiosk: KioskWithClient
               </div>
             )}
 
-            {/* Compartiments (pour GRAND) - avec fraction */}
+            {/* Compartiments (pour GRAND) - avec ordre LEFT, MIDDLE, RIGHT et design original */}
             {kiosk.kioskType === "GRAND" && compartments.length > 0 && (
               <div className="p-3 rounded-lg bg-white border">
                 <div className="flex items-center justify-between mb-2">
@@ -247,7 +259,7 @@ function KioskDetailsDialog({ kiosk, isOpen, onClose }: { kiosk: KioskWithClient
                   </Badge>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  {compartments.map((comp: any) => {
+                  {orderedCompartments.map((comp: any) => {
                     let statusIcon = null
                     let statusText = ""
                     let statusColor = ""
@@ -360,6 +372,15 @@ export default function KioskTab3({
     setFilteredKiosks(filtered)
   }, [kiosks, localFilterType, localFilterCategory, localSearchTerm])
 
+  // Fonction pour calculer les compartiments occupés d'un kiosque GRAND
+  const getOccupiedCount = (kiosk: KioskWithClient) => {
+    if (kiosk.kioskType !== "GRAND") return null
+    const compartments = Array.isArray(kiosk.compartments) ? kiosk.compartments : []
+    const occupied = compartments.filter((c: any) => c?.status === "OCCUPIED").length
+    const total = compartments.length
+    return { occupied, total }
+  }
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
       setSelectedIds(filteredKiosks.map((kiosk) => kiosk.id))
@@ -399,7 +420,6 @@ export default function KioskTab3({
     }
   }
 
-  // Forcer le rafraîchissement après modification pour que les compartiments soient à jour
   const handleKioskUpdate = (updatedKiosk: Kiosk) => {
     onKioskUpdate(updatedKiosk)
     onRefresh()
@@ -530,76 +550,87 @@ export default function KioskTab3({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredKiosks.map((kiosk) => (
-                <TableRow key={kiosk.id}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selectedIds.includes(kiosk.id)}
-                      onCheckedChange={(checked) => {
-                        if (checked) {
-                          setSelectedIds([...selectedIds, kiosk.id])
-                        } else {
-                          setSelectedIds(selectedIds.filter((id) => id !== kiosk.id))
-                        }
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="link"
-                      className="font-mono text-sm p-0 h-auto font-semibold text-orange-600 hover:text-orange-800"
-                      onClick={() => handleViewDetails(kiosk)}
-                    >
-                      {kiosk.kioskMatricule}
-                    </Button>
-                  </TableCell>
-                  <TableCell>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                      kiosk.kioskType === "MONO" ? "bg-orange-100 text-orange-700" : "bg-purple-100 text-purple-700"
-                    }`}>
-                      {typeTranslations[kiosk.kioskType] || kiosk.kioskType}
-                    </span>
-                  </TableCell>
-                  <TableCell className="max-w-[250px] truncate">{kiosk.kioskAddress || "-"}</TableCell>
-                  <TableCell>{townTranslations[kiosk.kioskTown] || kiosk.kioskTown}</TableCell>
-                  <TableCell>{kiosk.managerName || "-"}</TableCell>
-                  <TableCell>
-                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getStatusColor(kiosk.status)}`}>
-                      {getStatusTranslation(kiosk.status)}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
+              filteredKiosks.map((kiosk) => {
+                const occupiedInfo = getOccupiedCount(kiosk)
+                const isGrand = kiosk.kioskType === "GRAND"
+                const displayStatus = getStatusTranslation(
+                  kiosk.status, 
+                  isGrand, 
+                  occupiedInfo?.occupied, 
+                  occupiedInfo?.total
+                )
+                
+                return (
+                  <TableRow key={kiosk.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={selectedIds.includes(kiosk.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedIds([...selectedIds, kiosk.id])
+                          } else {
+                            setSelectedIds(selectedIds.filter((id) => id !== kiosk.id))
+                          }
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
+                        variant="link"
+                        className="font-mono text-sm p-0 h-auto font-semibold text-orange-600 hover:text-orange-800"
                         onClick={() => handleViewDetails(kiosk)}
-                        title="Voir les détails"
                       >
-                        <Eye className="h-4 w-4" />
+                        {kiosk.kioskMatricule}
                       </Button>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent side="left" className="w-32">
-                          <div className="flex flex-col space-y-1">
-                            <Button size="sm" variant="ghost" className="justify-start" onClick={() => handleModify(kiosk)}>
-                              Modifier
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        kiosk.kioskType === "MONO" ? "bg-orange-100 text-orange-700" : "bg-purple-100 text-purple-700"
+                      }`}>
+                        {typeTranslations[kiosk.kioskType] || kiosk.kioskType}
+                      </span>
+                    </TableCell>
+                    <TableCell className="max-w-[250px] truncate">{kiosk.kioskAddress || "-"}</TableCell>
+                    <TableCell>{townTranslations[kiosk.kioskTown] || kiosk.kioskTown}</TableCell>
+                    <TableCell>{kiosk.managerName || "-"}</TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getStatusColor(kiosk.status)}`}>
+                        {displayStatus}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleViewDetails(kiosk)}
+                          title="Voir les détails"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
                             </Button>
-                            <Button size="sm" variant="ghost" className="justify-start text-red-600" onClick={() => handleDelete(kiosk.id)}>
-                              Supprimer
-                            </Button>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+                          </PopoverTrigger>
+                          <PopoverContent side="left" className="w-32">
+                            <div className="flex flex-col space-y-1">
+                              <Button size="sm" variant="ghost" className="justify-start" onClick={() => handleModify(kiosk)}>
+                                Modifier
+                              </Button>
+                              <Button size="sm" variant="ghost" className="justify-start text-red-600" onClick={() => handleDelete(kiosk.id)}>
+                                Supprimer
+                              </Button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>
@@ -667,7 +698,6 @@ export default function KioskTab3({
         kiosk={selectedKiosk}
         onSuccess={(updatedKiosk) => {
           setIsModifyDialogOpen(false)
-          // Mettre à jour le kiosque dans la liste
           handleKioskUpdate(updatedKiosk)
         }}
       />
