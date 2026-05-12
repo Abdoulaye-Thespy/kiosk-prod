@@ -114,13 +114,13 @@ const linksResponsable = [
     icon: UserGroupIcon,
   },
   { name: 'Interventions', 
-    href: '/responsable/interventions', 
+    href: '/responsable/interventions',
     icon: ChartPieIcon 
   },
-  { name: 'Inventaires', 
-    href: '/responsable/inventaires', 
-    icon: ChartPieIcon 
-  },
+  // { name: 'Inventaires', 
+  //   href: '/responsable/inventaires', 
+  //   icon: ChartPieIcon 
+  // },
   // { name: 'Rapports d’activités', 
   //   href: '/responsable/rapports', 
   //   icon: ChartPieIcon 
