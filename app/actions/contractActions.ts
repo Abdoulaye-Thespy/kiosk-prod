@@ -3,7 +3,6 @@
 import { prisma } from "@/lib/prisma"
 import { revalidatePath } from "next/cache"
 import { ContractStatus, type KioskStatus } from "@prisma/client"
-import { generatePdf } from "@/lib/pdfGenerator"
 
 // Types
 type ContractFormData = {
@@ -24,7 +23,7 @@ type ContractFormData = {
   createdById?: string
 }
 
-// Update createContract to use the mockPDF function if pdfkit is not available
+// Create contract
 export async function createContract(formData: ContractFormData) {
   try {
     // Validate form data
@@ -50,8 +49,6 @@ export async function createContract(formData: ContractFormData) {
     // Calculate total amount
     const totalAmount = formData.paymentAmount * formData.contractDuration
 
-    console.log(formData);
-
     // Create the contract
     const contract = await prisma.contract.create({
       data: {
@@ -69,11 +66,15 @@ export async function createContract(formData: ContractFormData) {
         clientBusinessLocation: formData.clientBusinessLocation,
         contractDuration: formData.contractDuration,
         paymentFrequency: formData.paymentFrequency,
-        paymentAmount: parseFloat(formData.paymentAmount),
+        paymentAmount: parseFloat(formData.paymentAmount as any),
         totalAmount,
         createdById: formData.createdById!,
-        kiosks: {
-          connect: formData.kioskIds.map((id) => ({ id })),
+        kioskContracts: {
+          create: formData.kioskIds.map((kioskId) => ({
+            kioskId: parseInt(kioskId),
+            monthlyRent: parseFloat(formData.paymentAmount as any),
+            startDate: new Date(),
+          })),
         },
         contractActions: {
           create: {
@@ -83,39 +84,13 @@ export async function createContract(formData: ContractFormData) {
         },
       },
       include: {
-        kiosks: true,
+        kioskContracts: {
+          include: {
+            kiosk: true,
+          },
+        },
       },
     })
-
-    // Update kiosk status to RESERVED
-    // await prisma.kiosk.updateMany({
-    //   where: {
-    //     id: {
-    //       in: formData.kioskIds,
-    //     },
-    //   },
-    //   data: {
-    //     status: "RESERVED",
-    //   },
-    // })
-
-    try {
-      // Generate PDF contract (uses mock implementation if pdfkit not installed)
-      const pdfUrl = await generatePdf(contract)
-
-      // Update contract with PDF URL
-      await prisma.contract.update({
-        where: { id: contract.id },
-        data: {
-          contractDocument: pdfUrl,
-        },
-      })
-
-      contract.contractDocument = pdfUrl
-    } catch (pdfError) {
-      console.error("Error generating PDF:", pdfError)
-      // Continue without PDF if generation fails
-    }
 
     revalidatePath("/contracts")
 
@@ -137,12 +112,21 @@ export async function updateContractStatus(contractId: string, status: ContractS
   try {
     const contract = await prisma.contract.findUnique({
       where: { id: contractId },
-      include: { kiosks: true },
+      include: { 
+        kioskContracts: {
+          include: {
+            kiosk: true,
+          },
+        },
+      },
     })
 
     if (!contract) {
       return { success: false, error: "Contract not found" }
     }
+
+    // Récupérer les IDs des kiosques
+    const kioskIds = contract.kioskContracts.map(kc => kc.kioskId)
 
     let actionDescription = ""
     const additionalData: any = {}
@@ -159,15 +143,25 @@ export async function updateContractStatus(contractId: string, status: ContractS
         additionalData.signatureDate = new Date()
         additionalData.signedById = userId
 
-        // Update kiosk status to OCCUPIED
+        // Update kiosk status to ACTIVE
         await prisma.kiosk.updateMany({
           where: {
             id: {
-              in: contract.kiosks.map((k) => k.id),
+              in: kioskIds,
             },
           },
           data: {
-            status: "OCCUPIED",
+            status: "ACTIVE",
+          },
+        })
+
+        // Update kiosk contracts to active
+        await prisma.kioskContract.updateMany({
+          where: {
+            contractId: contractId,
+          },
+          data: {
+            isActive: true,
           },
         })
 
@@ -184,11 +178,21 @@ export async function updateContractStatus(contractId: string, status: ContractS
         await prisma.kiosk.updateMany({
           where: {
             id: {
-              in: contract.kiosks.map((k) => k.id),
+              in: kioskIds,
             },
           },
           data: {
             status: "AVAILABLE",
+          },
+        })
+
+        // Update kiosk contracts to inactive
+        await prisma.kioskContract.updateMany({
+          where: {
+            contractId: contractId,
+          },
+          data: {
+            isActive: false,
           },
         })
         break
@@ -201,11 +205,21 @@ export async function updateContractStatus(contractId: string, status: ContractS
         await prisma.kiosk.updateMany({
           where: {
             id: {
-              in: contract.kiosks.map((k) => k.id),
+              in: kioskIds,
             },
           },
           data: {
             status: "AVAILABLE",
+          },
+        })
+
+        // Update kiosk contracts to inactive
+        await prisma.kioskContract.updateMany({
+          where: {
+            contractId: contractId,
+          },
+          data: {
+            isActive: false,
           },
         })
         break
@@ -217,11 +231,21 @@ export async function updateContractStatus(contractId: string, status: ContractS
         await prisma.kiosk.updateMany({
           where: {
             id: {
-              in: contract.kiosks.map((k) => k.id),
+              in: kioskIds,
             },
           },
           data: {
             status: "AVAILABLE",
+          },
+        })
+
+        // Update kiosk contracts to inactive
+        await prisma.kioskContract.updateMany({
+          where: {
+            contractId: contractId,
+          },
+          data: {
+            isActive: false,
           },
         })
         break
@@ -244,7 +268,11 @@ export async function updateContractStatus(contractId: string, status: ContractS
         },
       },
       include: {
-        kiosks: true,
+        kioskContracts: {
+          include: {
+            kiosk: true,
+          },
+        },
         createdBy: true,
         signedBy: true,
         contractActions: {
@@ -254,20 +282,6 @@ export async function updateContractStatus(contractId: string, status: ContractS
         },
       },
     })
-
-    // Regenerate PDF if needed
-    if (status === ContractStatus.CONFIRMED || status === ContractStatus.ACTIVE) {
-      const pdfUrl = await generatePdf(updatedContract)
-
-      await prisma.contract.update({
-        where: { id: contractId },
-        data: {
-          contractDocument: pdfUrl,
-        },
-      })
-
-      updatedContract.contractDocument = pdfUrl
-    }
 
     revalidatePath("/contracts")
     revalidatePath(`/contracts/${contractId}`)
@@ -291,12 +305,17 @@ export async function getContract(contractId: string) {
     const contract = await prisma.contract.findUnique({
       where: { id: contractId },
       include: {
-        kiosks: true,
         createdBy: true,
         signedBy: true,
         contractActions: {
           orderBy: {
             createdAt: "desc",
+          },
+        },
+        kioskContracts: {
+          include: {
+            kiosk: true,
+            compartment: true,
           },
         },
       },
@@ -306,9 +325,16 @@ export async function getContract(contractId: string) {
       return { success: false, error: "Contract not found" }
     }
 
+    // Transformer pour avoir un tableau de kiosks simple
+    const formattedContract = {
+      ...contract,
+      kiosks: contract.kioskContracts.map(kc => kc.kiosk),
+      compartments: contract.kioskContracts.map(kc => kc.compartment).filter(Boolean),
+    }
+
     return {
       success: true,
-      contract,
+      contract: formattedContract,
     }
   } catch (error) {
     console.error("Error fetching contract:", error)
@@ -319,7 +345,76 @@ export async function getContract(contractId: string) {
   }
 }
 
-// Get all contracts
+// Get all contracts for staff
+export async function getAllContractsStaff(filters?: { status?: ContractStatus }) {
+  try {
+    const where: any = {}
+
+    if (filters?.status) {
+      where.status = filters.status
+    }
+
+    const contracts = await prisma.contract.findMany({
+      where,
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        signedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        contractActions: {
+          take: 1,
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
+        kioskContracts: {
+          include: {
+            kiosk: {
+              select: {
+                id: true,
+                kioskName: true,
+                kioskMatricule: true,
+                kioskType: true,
+              }
+            }
+          }
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    })
+
+    // Transformer les données pour avoir un tableau de kiosks plus simple
+    const formattedContracts = contracts.map(contract => ({
+      ...contract,
+      kiosks: contract.kioskContracts.map(kc => kc.kiosk)
+    }))
+
+    return {
+      success: true,
+      contracts: formattedContracts,
+    }
+  } catch (error) {
+    console.error("Error fetching contracts:", error)
+    return {
+      success: false,
+      error: "Failed to fetch contracts",
+    }
+  }
+}
+
+// Get all contracts (admin)
 export async function getAllContracts(filters?: { status?: ContractStatus; userId?: string }) {
   try {
     const where: any = {}
@@ -335,7 +430,6 @@ export async function getAllContracts(filters?: { status?: ContractStatus; userI
     const contracts = await prisma.contract.findMany({
       where,
       include: {
-        kiosks: true,
         createdBy: {
           select: {
             id: true,
@@ -356,57 +450,17 @@ export async function getAllContracts(filters?: { status?: ContractStatus; userI
             createdAt: "desc",
           },
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    })
-
-    return {
-      success: true,
-      contracts,
-    }
-  } catch (error) {
-    console.error("Error fetching contracts:", error)
-    return {
-      success: false,
-      error: "Failed to fetch contracts",
-    }
-  }
-}
-
-export async function getAllContractsStaff(filters?: { status?: ContractStatus }) {
-  try {
-    const where: any = {}
-
-    if (filters?.status) {
-      where.status = filters.status
-    }
-
-
-    const contracts = await prisma.contract.findMany({
-      where,
-      include: {
-        kiosks: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        signedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
-        contractActions: {
-          take: 1,
-          orderBy: {
-            createdAt: "desc",
-          },
+        kioskContracts: {
+          include: {
+            kiosk: {
+              select: {
+                id: true,
+                kioskName: true,
+                kioskMatricule: true,
+                kioskType: true,
+              }
+            }
+          }
         },
       },
       orderBy: {
@@ -414,9 +468,14 @@ export async function getAllContractsStaff(filters?: { status?: ContractStatus }
       },
     })
 
+    const formattedContracts = contracts.map(contract => ({
+      ...contract,
+      kiosks: contract.kioskContracts.map(kc => kc.kiosk)
+    }))
+
     return {
       success: true,
-      contracts,
+      contracts: formattedContracts,
     }
   } catch (error) {
     console.error("Error fetching contracts:", error)
@@ -498,87 +557,7 @@ export async function getAvailableKiosks() {
   }
 }
 
-// Add this new function to get all kiosks with their associated users
-export async function getKiosks(searchTerm?: string) {
-  try {
-    const where: any = {}
-
-    // Add search filter if provided
-    if (searchTerm) {
-      where.OR = [
-        { kiosqueNumber: { contains: searchTerm, mode: "insensitive" } },
-        { location: { contains: searchTerm, mode: "insensitive" } },
-        { users: { some: { user: { name: { contains: searchTerm, mode: "insensitive" } } } } },
-      ]
-    }
-
-    const kiosks = await prisma.kiosk.findMany({
-      where,
-      include: {
-        users: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                phone: true,
-                address: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        kiosqueNumber: "asc",
-      },
-    })
-
-    return {
-      success: true,
-      kiosks,
-    }
-  } catch (error) {
-    console.error("Error fetching kiosks:", error)
-    return {
-      success: false,
-      error: "Failed to fetch kiosks",
-    }
-  }
-}
-
-// Add this function to get a user by ID
-export async function getUserById(userId: string) {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        address: true,
-      },
-    })
-
-    if (!user) {
-      return { success: false, error: "User not found" }
-    }
-
-    return {
-      success: true,
-      user,
-    }
-  } catch (error) {
-    console.error("Error fetching user:", error)
-    return {
-      success: false,
-      error: "Failed to fetch user",
-    }
-  }
-}
-
-// Add this function to get kiosks without pagination
+// Get kiosks without pagination
 export async function getKiosksWithoutPagination({
   searchTerm = "",
   status,
@@ -595,6 +574,7 @@ export async function getKiosksWithoutPagination({
         { clientName: { contains: searchTerm, mode: "insensitive" } },
         { managerName: { contains: searchTerm, mode: "insensitive" } },
         { kioskAddress: { contains: searchTerm, mode: "insensitive" } },
+        { kioskMatricule: { contains: searchTerm, mode: "insensitive" } },
       ]
     }
 
@@ -620,12 +600,12 @@ export async function getKiosksWithoutPagination({
   }
 }
 
-// Add this function to get users with search capability
+// Get users with search capability
 export async function getUsers(searchTerm?: string, role: string = 'CLIENT') {
-    try {
-      const where: any = {
-        role // Use the passed role, defaulting to 'CLIENT'
-      }
+  try {
+    const where: any = {
+      role
+    }
 
     if (searchTerm) {
       where.OR = [
@@ -648,7 +628,7 @@ export async function getUsers(searchTerm?: string, role: string = 'CLIENT') {
         createdAt: true,
       },
       orderBy: { name: "asc" },
-      take: 50, // Limit results to prevent performance issues
+      take: 50,
     })
 
     return {
@@ -663,4 +643,3 @@ export async function getUsers(searchTerm?: string, role: string = 'CLIENT') {
     }
   }
 }
-

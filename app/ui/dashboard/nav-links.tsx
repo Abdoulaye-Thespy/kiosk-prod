@@ -34,7 +34,7 @@ const linksAdmin = [
     icon: ChartPieIcon 
   },
   { name: 'Factures & Paiments', href: '/admin/facturepaiement', icon: ClipboardDocumentIcon },
-  { name: 'Administration des Ventes', href: '/admin/administrationvente', icon: ClipboardDocumentIcon },
+  // { name: 'Administration des Ventes', href: '/admin/administrationvente', icon: ClipboardDocumentIcon },
   { name: 'Maintenances', href: '/admin/maintenances', icon: QuestionMarkCircleIcon },
   { name: 'Paramètres', href: '/admin/parametres', icon: Cog6ToothIcon },
 ];
